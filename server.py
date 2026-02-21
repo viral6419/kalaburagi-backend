@@ -14,7 +14,6 @@ import os, uuid, logging, bcrypt
 from datetime import datetime, timezone
 from pathlib import Path
 from jose import jwt as jose_jwt
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -207,54 +206,7 @@ async def update_lead(lead_id: str, data: LeadUpdate):
 @api_router.post("/chat", response_model=dict)
 async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
-    session = await db.chat_sessions.find_one({"session_id": session_id})
-    messages_history = session.get("messages", []) if session else []
-    system_message = """You are Kavya, a friendly and professional real estate assistant for Kalaburagi Estates — a premium real estate platform in Gulbarga (Kalaburagi), Karnataka, India.
-
-Your mission: Qualify leads naturally by collecting these details step by step:
-1. Intent: Buy, Sell, or Rent?
-2. Budget: Range in Lakhs or Crores?
-3. Preferred area in Kalaburagi (Sedam Road, Super Market, Kapnoor, Station Area, Bidar Road, etc.)?
-4. Timeline: When planning to visit?
-5. Best time to contact?
-6. Investor or end-user?
-
-Rules:
-- Keep responses SHORT and conversational (2-3 sentences max)
-- Be warm, professional, and helpful
-- After collecting key info, confirm inquiry is saved and agent will contact within 24 hours
-- Represent a premium luxury brand"""
-    chat_obj = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system_message
-    ).with_model("openai", "gpt-4.1")
-    user_msg = UserMessage(text=request.message)
-    response_text = await chat_obj.send_message(user_msg)
-    messages_history.append({"role": "user", "content": request.message})
-    messages_history.append({"role": "assistant", "content": response_text})
-    if session:
-        await db.chat_sessions.update_one({"session_id": session_id}, {"$set": {"messages": messages_history}})
-    else:
-        await db.chat_sessions.insert_one({
-            "session_id": session_id, "messages": messages_history,
-            "lead_data": request.lead_data or {},
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-    return {"session_id": session_id, "message": response_text}
-
-@api_router.get("/stats", response_model=dict)
-async def get_stats():
-    return {
-        "total_properties": await db.properties.count_documents({}),
-        "total_leads": await db.leads.count_documents({}),
-        "hot_leads": await db.leads.count_documents({"score": "hot"}),
-        "for_sale": await db.properties.count_documents({"status": "sale"}),
-        "for_rent": await db.properties.count_documents({"status": "rent"}),
-        "happy_clients": 1250,
-        "years_of_trust": 8,
-        "properties_sold": 850
-    }
+    return {"session_id": session_id, "message": "Thank you for your interest! Our team will contact you shortly. Call us at +91 9110278059 for immediate assistance."}
 
 @api_router.post("/auth/register", response_model=dict)
 async def register(data: UserRegister):
