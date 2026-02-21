@@ -1,7 +1,3 @@
-Click "Add file" → "Create new file"
-Name it: server.py
-Copy the code below in 3 parts (it's long):
-PART 1 of 3 - Copy this first:
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, File, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
@@ -25,7 +21,6 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'kalaburagi-secret-2024')
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -126,6 +121,7 @@ class UserListingCreate(BaseModel):
 
 class UserListingReject(BaseModel):
     rejection_reason: Optional[str] = "Listing does not meet our criteria"
+
 @api_router.get("/properties", response_model=List[dict])
 async def get_properties(
     type: Optional[str] = None,
@@ -208,6 +204,19 @@ async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     return {"session_id": session_id, "message": "Thank you for your interest! Our team will contact you shortly. Call us at +91 9110278059 for immediate assistance."}
 
+@api_router.get("/stats", response_model=dict)
+async def get_stats():
+    return {
+        "total_properties": await db.properties.count_documents({}),
+        "total_leads": await db.leads.count_documents({}),
+        "hot_leads": await db.leads.count_documents({"score": "hot"}),
+        "for_sale": await db.properties.count_documents({"status": "sale"}),
+        "for_rent": await db.properties.count_documents({"status": "rent"}),
+        "happy_clients": 1250,
+        "years_of_trust": 8,
+        "properties_sold": 850
+    }
+
 @api_router.post("/auth/register", response_model=dict)
 async def register(data: UserRegister):
     if await db.users.find_one({"email": data.email}):
@@ -250,7 +259,7 @@ async def upload_image(file: UploadFile = File(...)):
     allowed = {"jpg", "jpeg", "png", "webp", "gif"}
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
     if ext not in allowed:
-        raise HTTPException(400, "Only image files allowed (jpg, jpeg, png, webp)")
+        raise HTTPException(400, "Only image files allowed")
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10MB)")
@@ -269,12 +278,7 @@ async def serve_upload(filename: str):
 
 @api_router.post("/user-listings", response_model=dict)
 async def create_user_listing(listing: UserListingCreate):
-    doc = {
-        **listing.model_dump(),
-        "listing_id": str(uuid.uuid4()),
-        "approval_status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
+    doc = {**listing.model_dump(), "listing_id": str(uuid.uuid4()), "approval_status": "pending", "created_at": datetime.now(timezone.utc).isoformat()}
     await db.user_listings.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -292,48 +296,38 @@ async def approve_user_listing(listing_id: str):
     if not listing:
         raise HTTPException(404, "Listing not found")
     prop_doc = {
-        "property_id": str(uuid.uuid4()),
-        "title": listing["title"], "type": listing["type"],
-        "status": listing["status"], "price": listing["price"],
-        "price_unit": listing["price_unit"], "area": listing["area"],
-        "area_unit": listing["area_unit"], "bedrooms": listing.get("bedrooms"),
+        "property_id": str(uuid.uuid4()), "title": listing["title"], "type": listing["type"],
+        "status": listing["status"], "price": listing["price"], "price_unit": listing["price_unit"],
+        "area": listing["area"], "area_unit": listing["area_unit"], "bedrooms": listing.get("bedrooms"),
         "bathrooms": listing.get("bathrooms"), "location": listing["location"],
         "pincode": listing.get("pincode", "585101"), "address": listing["address"],
         "description": listing["description"], "images": listing.get("images", []),
-        "amenities": listing.get("amenities", []), "is_featured": False,
-        "is_new_launch": False, "ready_to_move": True,
-        "agent_name": listing.get("submitter_name", "Owner"),
+        "amenities": listing.get("amenities", []), "is_featured": False, "is_new_launch": False,
+        "ready_to_move": True, "agent_name": listing.get("submitter_name", "Owner"),
         "agent_phone": listing.get("submitter_phone", "+91 9110278059"),
         "views": 0, "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.properties.insert_one(prop_doc)
     await db.user_listings.update_one({"listing_id": listing_id}, {"$set": {"approval_status": "approved"}})
-    return {"message": "Approved and published as property"}
+    return {"message": "Approved and published"}
 
 @api_router.put("/user-listings/{listing_id}/reject", response_model=dict)
 async def reject_user_listing(listing_id: str, data: UserListingReject):
-    await db.user_listings.update_one(
-        {"listing_id": listing_id},
-        {"$set": {"approval_status": "rejected", "rejection_reason": data.rejection_reason}}
-    )
-    return {"message": "Listing rejected"}
+    await db.user_listings.update_one({"listing_id": listing_id}, {"$set": {"approval_status": "rejected", "rejection_reason": data.rejection_reason}})
+    return {"message": "Rejected"}
 
 @api_router.get("/admin/dashboard", response_model=dict)
 async def admin_dashboard():
     stats = await get_stats()
     recent_leads = await db.leads.find({}, {"_id": 0}).sort("created_at", -1).limit(10).to_list(10)
     return {"stats": stats, "recent_leads": recent_leads}
+
 SAMPLE_PROPERTIES = [
-    {"title": "Luxury 3 BHK Apartment - Sedam Road", "type": "residential", "status": "sale", "price": 45.0, "price_unit": "lakhs", "area": 1450.0, "area_unit": "sqft", "bedrooms": 3, "bathrooms": 2, "location": "Sedam Road", "pincode": "585101", "address": "Sedam Road, Near District Hospital, Kalaburagi", "description": "Spacious 3 BHK apartment with premium interiors, modular kitchen, and covered parking.", "images": ["https://images.unsplash.com/photo-1663672937496-f53fedcacf66?w=800&q=80"], "amenities": ["Power Backup", "Covered Parking", "Security", "Lift", "Gym"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 125},
-    {"title": "Prime Open Plot - Super Market Area", "type": "plot", "status": "sale", "price": 12.0, "price_unit": "lakhs", "area": 1200.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Super Market Area", "pincode": "585101", "address": "Super Market Area, Main Road, Kalaburagi", "description": "Excellent prime residential plot near Super Market. All government approvals done.", "images": ["https://images.unsplash.com/photo-1757924432508-d4e92411caeb?w=800&q=80"], "amenities": ["Road Facility", "Water Supply", "Electricity", "Drainage"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 89},
-    {"title": "Commercial Building - Main Road", "type": "commercial", "status": "sale", "price": 1.2, "price_unit": "crores", "area": 5000.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Gulbarga Main Road", "pincode": "585101", "address": "Main Road, Near Bus Stand, Kalaburagi", "description": "G+3 commercial building ideal for offices, showrooms or retail.", "images": ["https://images.unsplash.com/photo-1767950470198-c9cd97f8ed87?w=800&q=80"], "amenities": ["Lift", "Parking", "Security", "Power Backup", "Reception"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 210},
-    {"title": "2 BHK New Apartment - Kapnoor", "type": "residential", "status": "sale", "price": 28.0, "price_unit": "lakhs", "area": 950.0, "area_unit": "sqft", "bedrooms": 2, "bathrooms": 2, "location": "Kapnoor", "pincode": "585105", "address": "Kapnoor Layout, Near Park, Kalaburagi", "description": "Well-designed 2 BHK apartment in peaceful locality.", "images": ["https://images.pexels.com/photos/5644678/pexels-photo-5644678.jpeg?w=800"], "amenities": ["Security", "Children Play Area", "Garden", "Parking"], "is_featured": False, "is_new_launch": True, "ready_to_move": False, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 67},
-    {"title": "Premium Villa - Ashraya Colony", "type": "residential", "status": "sale", "price": 85.0, "price_unit": "lakhs", "area": 2400.0, "area_unit": "sqft", "bedrooms": 4, "bathrooms": 3, "location": "Ashraya Colony", "pincode": "585101", "address": "Ashraya Colony, Kalaburagi", "description": "Stunning 4 BHK independent villa with premium finishes.", "images": ["https://images.unsplash.com/photo-1768463852120-9360d0e39912?w=800&q=80"], "amenities": ["Private Garden", "2 Parking", "Security", "Power Backup", "Modular Kitchen"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 178},
-    {"title": "Shop Space for Rent - Station Area", "type": "commercial", "status": "rent", "price": 25000.0, "price_unit": "month", "area": 800.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Station Area", "pincode": "585101", "address": "Railway Station Road, Kalaburagi", "description": "Prime commercial shop space on Station Road with high footfall.", "images": ["https://images.pexels.com/photos/35171247/pexels-photo-35171247.jpeg?w=800"], "amenities": ["Power Connection", "24x7 Security", "CCTV"], "is_featured": False, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 93},
-    {"title": "New Gated Layout - Bidar Road", "type": "layout", "status": "upcoming", "price": 6.5, "price_unit": "lakhs", "area": 1200.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Bidar Road", "pincode": "585101", "address": "Bidar Road, 8km from City Center, Kalaburagi", "description": "Premium gated layout with 100+ plots. Wide BT roads, parks, underground drainage.", "images": ["https://images.unsplash.com/photo-1663672937496-f53fedcacf66?w=800&q=80"], "amenities": ["Gated Community", "Wide Roads", "Park", "Underground Drainage", "Street Lights"], "is_featured": True, "is_new_launch": True, "ready_to_move": False, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 312},
-    {"title": "3 BHK Flat for Rent - Aland Road", "type": "rental", "status": "rent", "price": 15000.0, "price_unit": "month", "area": 1200.0, "area_unit": "sqft", "bedrooms": 3, "bathrooms": 2, "location": "Aland Road", "pincode": "585101", "address": "Aland Road, Near School, Kalaburagi", "description": "Well-maintained 3 BHK flat in prime residential area.", "images": ["https://images.pexels.com/photos/5644678/pexels-photo-5644678.jpeg?w=800"], "amenities": ["Semi-Furnished", "Parking", "Security", "Water Supply"], "is_featured": False, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 56},
-    {"title": "4 BHK Penthouse - New Town", "type": "residential", "status": "sale", "price": 95.0, "price_unit": "lakhs", "area": 3200.0, "area_unit": "sqft", "bedrooms": 4, "bathrooms": 4, "location": "New Town", "pincode": "585101", "address": "New Town Development Area, Kalaburagi", "description": "Exclusive top-floor penthouse with panoramic views of Kalaburagi.", "images": ["https://images.unsplash.com/photo-1767950470198-c9cd97f8ed87?w=800&q=80"], "amenities": ["Private Terrace", "Smart Home", "3 Parking", "24x7 Security", "Jacuzzi"], "is_featured": True, "is_new_launch": True, "ready_to_move": False, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 445},
-    {"title": "Farm Land - Shahabad Road", "type": "farm", "status": "sale", "price": 8.0, "price_unit": "lakhs", "area": 1.0, "area_unit": "acres", "bedrooms": None, "bathrooms": None, "location": "Shahabad", "pincode": "585228", "address": "Shahabad Road, 15km from Kalaburagi", "description": "Fertile agricultural land with water source. Good road connectivity.", "images": ["https://images.unsplash.com/photo-1757924432508-d4e92411caeb?w=800&q=80"], "amenities": ["Water Source", "Road Access", "Electricity Nearby"], "is_featured": False, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 45},
+    {"title": "Luxury 3 BHK Apartment - Sedam Road", "type": "residential", "status": "sale", "price": 45.0, "price_unit": "lakhs", "area": 1450.0, "area_unit": "sqft", "bedrooms": 3, "bathrooms": 2, "location": "Sedam Road", "pincode": "585101", "address": "Sedam Road, Near District Hospital, Kalaburagi", "description": "Spacious 3 BHK apartment with premium interiors.", "images": ["https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80"], "amenities": ["Power Backup", "Covered Parking", "Security", "Lift", "Gym"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 125},
+    {"title": "Prime Open Plot - Super Market Area", "type": "plot", "status": "sale", "price": 12.0, "price_unit": "lakhs", "area": 1200.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Super Market Area", "pincode": "585101", "address": "Super Market Area, Main Road, Kalaburagi", "description": "Excellent prime residential plot.", "images": ["https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=800&q=80"], "amenities": ["Road Facility", "Water Supply", "Electricity"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 89},
+    {"title": "Commercial Building - Main Road", "type": "commercial", "status": "sale", "price": 1.2, "price_unit": "crores", "area": 5000.0, "area_unit": "sqft", "bedrooms": None, "bathrooms": None, "location": "Gulbarga Main Road", "pincode": "585101", "address": "Main Road, Near Bus Stand, Kalaburagi", "description": "G+3 commercial building ideal for offices.", "images": ["https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&q=80"], "amenities": ["Lift", "Parking", "Security", "Power Backup"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 210},
+    {"title": "2 BHK New Apartment - Kapnoor", "type": "residential", "status": "sale", "price": 28.0, "price_unit": "lakhs", "area": 950.0, "area_unit": "sqft", "bedrooms": 2, "bathrooms": 2, "location": "Kapnoor", "pincode": "585105", "address": "Kapnoor Layout, Kalaburagi", "description": "Well-designed 2 BHK apartment.", "images": ["https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=80"], "amenities": ["Security", "Children Play Area", "Garden", "Parking"], "is_featured": False, "is_new_launch": True, "ready_to_move": False, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 67},
+    {"title": "Premium Villa - Ashraya Colony", "type": "residential", "status": "sale", "price": 85.0, "price_unit": "lakhs", "area": 2400.0, "area_unit": "sqft", "bedrooms": 4, "bathrooms": 3, "location": "Ashraya Colony", "pincode": "585101", "address": "Ashraya Colony, Kalaburagi", "description": "Stunning 4 BHK independent villa.", "images": ["https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800&q=80"], "amenities": ["Private Garden", "2 Parking", "Security", "Power Backup"], "is_featured": True, "is_new_launch": False, "ready_to_move": True, "agent_name": "Kalaburagi Estates", "agent_phone": "+91 9110278059", "views": 178},
 ]
 
 async def seed_db():
@@ -350,11 +344,7 @@ async def seed_db():
         logger.info("Admin user created")
 
 app.include_router(api_router)
-app.add_middleware(
-    CORSMiddleware, allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"], allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','), allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("startup")
 async def startup():
