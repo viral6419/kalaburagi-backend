@@ -8,4 +8,5 @@ python-jose==3.5.0
 python-multipart==0.0.22
 pydantic==2.12.5
 aiohttp==3.13.3
-emergentintegrations==0.1.0
+httpx==0.28.1
+openai==1.99.9
